@@ -1,0 +1,6 @@
+,lw_z,lw_p,lw_sig,boot_p,boot_sig,dm_stat,dm_p,dm_sig
+均值方差(MV),-0.5775,0.5636,False,0.6666,False,5.0769,0.0,True
+风险平价(RP),1.6797,0.093,False,0.519,False,-3.2921,0.001,True
+层次化RP(HRP),1.6715,0.0946,False,0.5252,False,-3.528,0.0004,True
+反中心性(原论文),-0.4568,0.6478,False,0.6818,False,0.3042,0.761,False
+网络正则化RP(本文),1.6333,0.1024,False,0.5276,False,-2.6845,0.0073,True
