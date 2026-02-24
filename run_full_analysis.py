@@ -49,6 +49,7 @@ from portfolio_strategies import (
     network_regularized_rp,
     graph_enhanced_bl, denoised_rp, community_bl_rp,
     graph_laplacian_mv, pmfg_filtered_rp, graph_smoothed_bl,
+    network_constrained_minvar, community_minvar,
     select_gamma_cv, STRATEGY_REGISTRY, compute_weights,
 )
 from backtest_engine import (
@@ -454,15 +455,16 @@ def part2_gamma_selection(net_results: dict):
 
 def part3_backtest(net_results: dict, best_gamma: float):
     """
-    Part 3: 18种策略滚动回测
+    Part 3: 20种策略滚动回测
       基准 (1种): 等权
       传统 (7种): MV, MinVar, MaxDiv, RP, HRP, BL无观点, BL动量
       图模型简单规则 (3种): 反中心性, 直接中心性, PageRank
-      融合方法 (7种): NRRP, Graph-BL, Denoised-RP, Community-BL-RP,
-                      Laplacian-MV, PMFG-Filtered-RP, Graph-Smoothed-BL
+      融合方法 (9种): NRRP, Graph-BL, Denoised-RP, Community-BL-RP,
+                      Laplacian-MV, PMFG-Filtered-RP, Graph-Smoothed-BL,
+                      Net-Constrained-MinVar, Community-MinVar
     """
     print("\n" + "█" * 60)
-    print("  Part 3: 18种策略滚动回测")
+    print("  Part 3: 20种策略滚动回测")
     print("█" * 60)
 
     # 加载三年合并数据
@@ -477,7 +479,7 @@ def part3_backtest(net_results: dict, best_gamma: float):
     print(f"  样本外起始: {returns_stocks.index[LOOKBACK].strftime('%Y-%m-%d')}")
 
     backtest_results = {}
-    N_STRAT = 18
+    N_STRAT = 20
 
     # ---- 基准 ----
     print(f"\n  [ 1/{N_STRAT}] 等权 (1/N)...", end="")
@@ -644,6 +646,25 @@ def part3_backtest(net_results: dict, best_gamma: float):
     backtest_results["graph_smooth_bl"] = res
     print(f" 完成 ({time.time()-t0:.1f}s)")
 
+    # ---- 图模型+MinVar融合 (v4核心创新) ----
+    print(f"  [19/{N_STRAT}] ◆ 网络约束MinVar (Net-Constrained MinVar)...", end="")
+    t0 = time.time()
+    res = rolling_backtest(
+        returns_stocks, network_constrained_minvar,
+        lookback=LOOKBACK, rebalance_freq=REBALANCE_FREQ,
+        network_func=quick_network, verbose=False)
+    backtest_results["net_minvar"] = res
+    print(f" 完成 ({time.time()-t0:.1f}s)")
+
+    print(f"  [20/{N_STRAT}] ◆ 社区MinVar (Community-MinVar)...", end="")
+    t0 = time.time()
+    res = rolling_backtest(
+        returns_stocks, community_minvar,
+        lookback=LOOKBACK, rebalance_freq=REBALANCE_FREQ,
+        network_func=quick_network, verbose=False)
+    backtest_results["comm_minvar"] = res
+    print(f" 完成 ({time.time()-t0:.1f}s)")
+
     return backtest_results
 
 
@@ -683,6 +704,8 @@ def part4_evaluation(backtest_results: dict):
         "laplacian_mv": "◆拉普拉斯MV",
         "pmfg_filtered_rp": "◆图过滤RP",
         "graph_smooth_bl": "◆图平滑动量BL",
+        "net_minvar": "◆网络约束MinVar",
+        "comm_minvar": "◆社区MinVar",
     }
     perf_df.index = [label_map.get(n, n) for n in perf_df.index]
     if not test_df.empty:
@@ -787,7 +810,7 @@ def _plot_cumulative_returns(backtest_results: dict, label_map: dict):
 
     ax.set_xlabel("日期", fontsize=12)
     ax.set_ylabel("累计净值", fontsize=12)
-    ax.set_title("十八种资产配置策略累计净值对比", fontsize=14)
+    ax.set_title("二十种资产配置策略累计净值对比", fontsize=14)
     ax.legend(fontsize=10, loc="upper left")
     ax.grid(True, alpha=0.3)
     ax.axhline(y=1.0, color="black", linestyle="-", linewidth=0.5, alpha=0.5)
@@ -1071,6 +1094,8 @@ def part5_robustness(backtest_results: dict, net_results: dict,
             "laplacian_mv": "◆拉普拉斯MV",
             "pmfg_filtered_rp": "◆图过滤RP",
             "graph_smooth_bl": "◆图平滑动量BL",
+            "net_minvar": "◆网络约束MinVar",
+            "comm_minvar": "◆社区MinVar",
         }
         rdf.index = [label_map_local.get(n, n) for n in rdf.index]
         rdf.to_csv(os.path.join(TABLES_DIR,
@@ -1188,10 +1213,10 @@ if __name__ == "__main__":
     total_start = time.time()
 
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║  基于图模型的资产配置策略 - 完整分析 (v3增强版)             ║")
-    print("║  18种策略: 基准(1)+传统(7)+图规则(3)+融合(7)               ║")
-    print("║  新增: MinVar, MaxDiv, Laplacian-MV, PMFG-Filtered-RP,    ║")
-    print("║        Graph-Smoothed-BL 五种前沿方法                      ║")
+    print("║  基于图模型的资产配置策略 - 完整分析 (v4增强版)             ║")
+    print("║  20种策略: 基准(1)+传统(7)+图规则(3)+融合(9)               ║")
+    print("║  新增: Net-MinVar, Comm-MinVar 等图模型+MinVar融合策略      ║")
+    print("║  覆盖: 从经典到前沿的完整策略谱系                          ║")
     print("╚══════════════════════════════════════════════════════════════╝\n")
 
     # Part 1: 网络分析

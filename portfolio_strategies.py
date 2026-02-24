@@ -1,30 +1,32 @@
 """
 投资组合策略模块
 ================
-18种资产配置策略实现 (与 theoretical_framework_v2 §2.3.2 对应):
+20种资产配置策略实现 (与 theoretical_framework_v2 §2.3.2 对应):
   基准 (1种):
     1. Equal Weight (1/N)
-  传统 (5种):
+  传统 (7种):
     2. Mean-Variance (Markowitz + Ledoit-Wolf 收缩)
     3. Risk Parity (标准风险平价)
     4. HRP (层次化风险平价)
     5. Black-Litterman 无观点 (逆优化隐含均衡收益)
     6. Black-Litterman 动量观点 (量化信号自动生成观点)
+    7. Minimum Variance (最小方差, Jagannathan & Ma 2003)
+    8. Maximum Diversification (最大分散化, Choueifaty 2008)
   图模型简单规则 (3种):
-    7. Inverse Centrality (反中心性, §2.3.2 规则1)
-    8. Direct Centrality (中心性直接加权, §2.3.2 规则2)
-    9. PageRank Weighting (§2.3.2 规则3)
-  融合方法 (7种, 含本文贡献):
-   10. Network-Regularized Risk Parity (§2.4.2 NRRP)
-   11. Graph-Enhanced Black-Litterman (§2.4.3 网络增强BL)
-   12. RMT-Denoised Risk Parity (§2.4.4 去噪风险平价)
-   13. Community BL-RP Hybrid (§2.4.5 社区BL-RP混合)
-  前沿新增 (5种):
-   14. Minimum Variance (最小方差, Jagannathan & Ma 2003)
-   15. Maximum Diversification (最大分散化, Choueifaty 2008)
-   16. Graph Laplacian MV (图拉普拉斯正则化, Cardoso 2021)
-   17. PMFG-Filtered RP (图结构协方差过滤RP, Aste 2017)
+    9. Inverse Centrality (反中心性, §2.3.2 规则1)
+   10. Direct Centrality (中心性直接加权, §2.3.2 规则2)
+   11. PageRank Weighting (§2.3.2 规则3)
+  融合方法 (9种, 含本文贡献):
+   12. Network-Regularized Risk Parity (§2.4.2 NRRP)
+   13. Graph-Enhanced Black-Litterman (§2.4.3 网络增强BL)
+   14. RMT-Denoised Risk Parity (§2.4.4 去噪风险平价)
+   15. Community BL-RP Hybrid (§2.4.5 社区BL-RP混合)
+   16. Graph Laplacian MV (图拉普拉斯正则化)
+   17. PMFG-Filtered RP (图结构协方差过滤RP)
    18. Graph-Smoothed Momentum BL (图平滑动量BL)
+  ★ 图模型+MinVar融合 (2种, v3核心创新):
+   19. Network-Constrained MinVar (网络约束最小方差, §2.4.10)
+   20. Community-MinVar (社区平衡最小方差, §2.4.11)
 """
 
 import numpy as np
@@ -1537,6 +1539,263 @@ def select_gamma_cv(returns_train: pd.DataFrame,
 
 
 # ============================================================
+#  19. Network-Constrained MinVar (网络约束最小方差)
+# ============================================================
+
+def network_constrained_minvar(returns: pd.DataFrame,
+                               centralities: pd.DataFrame = None,
+                               max_weight: float = 0.10,
+                               centrality_shrink: float = 0.5,
+                               **kwargs) -> np.ndarray:
+    """
+    网络约束最小方差 (Network-Constrained MinVar)
+
+    核心思想:
+      MinVar 仅依赖 Σ, 完全避免 μ 估计误差。
+      其瓶颈在于: 可能过度集中于低波动但系统重要性高的资产
+      (如银行股、宽基指数), 在系统性风险爆发时集中暴露。
+
+      本策略利用网络介数中心性(衡量系统性风险传导桥梁角色)
+      对 MinVar 的权重上界施加 **自适应约束**:
+        β_max(i) = β_base × (1 - shrink × normalized_centrality(i))
+
+      高中心性资产(风险传导枢纽) → 更低的权重上界
+      低中心性资产(网络外围)     → 保持原始上界
+
+    理论依据:
+      - Jagannathan & Ma (2003): 约束隐式等价于协方差收缩
+      - 命题1 (中心性-风险传染假说): 高中心性资产的系统性风险更高
+      - 自适应约束 ≠ 改变目标函数, 保留了MinVar的最优性结构
+
+    参数:
+      centrality_shrink: 最大收缩比例 (默认0.5, 即最高中心性资产
+                         的上界收缩到 β_base × 0.5)
+    """
+    n = returns.shape[1]
+    lw = LedoitWolf().fit(returns.values)
+    cov = lw.covariance_ * 252
+
+    # 自适应权重上界
+    if centralities is not None and 'betweenness' in centralities.columns:
+        assets = returns.columns.tolist()
+        betw = np.array([
+            centralities.loc[a, 'betweenness']
+            if a in centralities.index else 0.0
+            for a in assets
+        ])
+        # Min-Max归一化到 [0, 1]
+        b_min, b_max = betw.min(), betw.max()
+        if b_max > b_min:
+            norm_betw = (betw - b_min) / (b_max - b_min)
+        else:
+            norm_betw = np.zeros(n)
+
+        # 自适应上界: 高中心性 → 更低的上界
+        adaptive_ub = max_weight * (1.0 - centrality_shrink * norm_betw)
+        # 确保下界不低于 max_weight 的 20%
+        adaptive_ub = np.maximum(adaptive_ub, max_weight * 0.2)
+    else:
+        adaptive_ub = np.full(n, max_weight)
+
+    def portfolio_var(w):
+        return w @ cov @ w
+
+    def portfolio_var_grad(w):
+        return 2 * cov @ w
+
+    constraints = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+    bounds = [(0.0, float(adaptive_ub[i])) for i in range(n)]
+    w0 = np.ones(n) / n
+
+    result = minimize(portfolio_var, w0, jac=portfolio_var_grad,
+                      method="SLSQP", bounds=bounds,
+                      constraints=constraints,
+                      options={"maxiter": 1000, "ftol": 1e-12})
+
+    if result.success:
+        w = result.x
+        w = np.maximum(w, 0)
+        w /= w.sum()
+        return w
+    else:
+        return minimum_variance(returns, max_weight=max_weight)
+
+
+# ============================================================
+#  20. Community-MinVar (社区平衡最小方差)
+# ============================================================
+
+def community_minvar(returns: pd.DataFrame,
+                     centralities: pd.DataFrame = None,
+                     partition: dict = None,
+                     max_weight: float = 0.10,
+                     centrality_shrink: float = 0.3,
+                     **kwargs) -> np.ndarray:
+    """
+    社区平衡最小方差 (Community-Balanced MinVar)
+
+    核心思想 (两层框架):
+      Layer 1: 跨社区风险平价 — 确保各网络社区的风险贡献均衡
+      Layer 2: 社区内最小方差 — 在每个社区内执行MinVar,
+              同时用中心性自适应约束防止集中于系统核心资产
+
+    理论创新:
+      标准MinVar的问题: 可能将资金集中在少数低波动社区(如银行社区),
+      导致社区间分散化不足。
+      本策略融合了:
+        - MinVar的低波动优势 (每个社区内部最小化方差)
+        - 社区结构的分散化 (跨社区风险平价, 命题2)
+        - 中心性风险控制 (自适应约束, 命题1)
+
+    对比:
+      vs 标准MinVar:   增加了跨社区分散化
+      vs Community-BL-RP: 用MinVar替代BL(不需μ估计)
+      vs HRP:          用PMFG社区替代二叉树聚类(经济学含义更强)
+    """
+    n = returns.shape[1]
+    assets = returns.columns.tolist()
+
+    # --- 获取社区划分 ---
+    if partition is None:
+        # 无社区信息, 退化为网络约束MinVar
+        return network_constrained_minvar(
+            returns, centralities=centralities,
+            max_weight=max_weight, centrality_shrink=centrality_shrink
+        )
+
+    # 社区映射
+    communities = {}
+    for asset in assets:
+        c = partition.get(asset, 0)
+        if c not in communities:
+            communities[c] = []
+        communities[c].append(asset)
+
+    # 至少2个社区才有分层意义
+    if len(communities) < 2:
+        return network_constrained_minvar(
+            returns, centralities=centralities,
+            max_weight=max_weight, centrality_shrink=centrality_shrink
+        )
+
+    # --- Layer 1: 跨社区风险平价 ---
+    lw_full = LedoitWolf().fit(returns.values)
+    cov_full = lw_full.covariance_ * 252
+
+    # 社区等权收益率
+    comm_ids = sorted(communities.keys())
+    K = len(comm_ids)
+    comm_returns = pd.DataFrame()
+    for c_id in comm_ids:
+        members = communities[c_id]
+        cols = [a for a in members if a in returns.columns]
+        if len(cols) > 0:
+            comm_returns[f'comm_{c_id}'] = returns[cols].mean(axis=1)
+
+    if comm_returns.shape[1] < 2:
+        return network_constrained_minvar(
+            returns, centralities=centralities,
+            max_weight=max_weight, centrality_shrink=centrality_shrink
+        )
+
+    # 社区间风险平价
+    lw_comm = LedoitWolf().fit(comm_returns.values)
+    cov_comm = lw_comm.covariance_ * 252
+
+    def rp_obj(w_c):
+        sigma_p = np.sqrt(w_c @ cov_comm @ w_c + 1e-12)
+        mrc = cov_comm @ w_c / sigma_p
+        rc = w_c * mrc
+        target = sigma_p / len(w_c)
+        return np.sum((rc - target) ** 2)
+
+    cons_c = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+    bnds_c = [(0.01, 1.0)] * K
+    w0_c = np.ones(K) / K
+
+    res_c = minimize(rp_obj, w0_c, method="SLSQP",
+                     bounds=bnds_c, constraints=cons_c,
+                     options={"maxiter": 500, "ftol": 1e-10})
+
+    if res_c.success:
+        W_comm = np.maximum(res_c.x, 0)
+        W_comm /= W_comm.sum()
+    else:
+        W_comm = np.ones(K) / K
+
+    # --- Layer 2: 社区内 MinVar + 中心性约束 ---
+    w_final = np.zeros(n)
+
+    for idx, c_id in enumerate(comm_ids):
+        members = communities[c_id]
+        cols = [a for a in members if a in returns.columns]
+        if len(cols) == 0:
+            continue
+
+        member_idx = [assets.index(a) for a in cols]
+        nc = len(cols)
+
+        if nc == 1:
+            w_final[member_idx[0]] = W_comm[idx]
+            continue
+
+        # 社区内协方差
+        cov_sub = cov_full[np.ix_(member_idx, member_idx)]
+
+        # 中心性自适应约束
+        if centralities is not None and 'betweenness' in centralities.columns:
+            betw_sub = np.array([
+                centralities.loc[a, 'betweenness']
+                if a in centralities.index else 0.0
+                for a in cols
+            ])
+            b_min, b_max = betw_sub.min(), betw_sub.max()
+            if b_max > b_min:
+                norm_b = (betw_sub - b_min) / (b_max - b_min)
+            else:
+                norm_b = np.zeros(nc)
+            # 社区内上界 (相对于社区权重)
+            relative_ub = (1.0 - centrality_shrink * norm_b)
+            relative_ub = np.maximum(relative_ub, 0.2)
+        else:
+            relative_ub = np.ones(nc)
+
+        # 社区内 MinVar
+        def sub_var(w):
+            return w @ cov_sub @ w
+
+        def sub_var_grad(w):
+            return 2 * cov_sub @ w
+
+        cons_sub = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+        bnds_sub = [(0.0, float(relative_ub[j])) for j in range(nc)]
+        w0_sub = np.ones(nc) / nc
+
+        res_sub = minimize(sub_var, w0_sub, jac=sub_var_grad,
+                           method="SLSQP", bounds=bnds_sub,
+                           constraints=cons_sub,
+                           options={"maxiter": 500, "ftol": 1e-12})
+
+        if res_sub.success:
+            w_sub = np.maximum(res_sub.x, 0)
+            w_sub /= w_sub.sum()
+        else:
+            w_sub = np.ones(nc) / nc
+
+        for j, mi in enumerate(member_idx):
+            w_final[mi] = W_comm[idx] * w_sub[j]
+
+    # 全局最大权重约束 & 归一化
+    w_final = np.minimum(w_final, max_weight)
+    if w_final.sum() > 0:
+        w_final /= w_final.sum()
+    else:
+        w_final = np.ones(n) / n
+
+    return w_final
+
+
+# ============================================================
 #  策略工厂: 统一接口
 # ============================================================
 
@@ -1563,6 +1822,8 @@ STRATEGY_REGISTRY = {
     "laplacian_mv":      {"func": graph_laplacian_mv,      "label": "拉普拉斯MV",        "type": "融合"},
     "pmfg_filtered_rp":  {"func": pmfg_filtered_rp,        "label": "图过滤RP",          "type": "融合"},
     "graph_smooth_bl":   {"func": graph_smoothed_bl,       "label": "图平滑动量BL",      "type": "融合"},
+    "net_minvar":        {"func": network_constrained_minvar, "label": "◆网络约束MinVar",  "type": "融合"},
+    "comm_minvar":       {"func": community_minvar,          "label": "◆社区MinVar",       "type": "融合"},
 }
 
 

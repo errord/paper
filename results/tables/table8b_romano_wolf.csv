@@ -6,7 +6,9 @@ BL无观点,0.4618,1.0,False
 ★社区BL-RP,0.5174,1.0,False
 网络正则化RP,0.5213,1.0,False
 层次化RP(HRP),0.5256,1.0,False
+◆社区MinVar,0.5496,1.0,False
 ◆最小方差(MinVar),0.5625,1.0,False
+◆网络约束MinVar,0.5665,1.0,False
 ★网络增强BL,0.5912,1.0,False
 ◆最大分散化(MaxDiv),0.6151,1.0,False
 PageRank(规则3),0.6267,1.0,False
