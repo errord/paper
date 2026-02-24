@@ -469,7 +469,7 @@ def network_regularized_rp(returns: pd.DataFrame,
     """
     n = returns.shape[1]
     assets = returns.columns.tolist()
-    lw = LedoitWolf().fit(returns.values)
+    lw = LedoitWolf().fit(returns.to_numpy())
     cov = lw.covariance_ * 252
 
     if centralities is None:
@@ -510,28 +510,28 @@ def network_regularized_rp(returns: pd.DataFrame,
         comm_returns.append(comm_ret)
     comm_returns_df = pd.DataFrame(comm_returns).T
 
-    lw_comm = LedoitWolf().fit(comm_returns_df.values)
+    lw_comm = LedoitWolf().fit(comm_returns_df.to_numpy())
     cov_comm = lw_comm.covariance_ * 252
 
     # 社区层面风险平价
-    def comm_rp_obj(W):
-        sigma = np.sqrt(W @ cov_comm @ W)
+    def comm_rp_obj(w):
+        sigma = np.sqrt(w @ cov_comm @ w)
         if sigma < 1e-10:
             return 1e10
-        mrc = cov_comm @ W / sigma
-        rc = W * mrc
+        mrc = cov_comm @ w / sigma
+        rc = w * mrc
         target = sigma / K
         return np.sum((rc - target) ** 2)
 
-    W0 = np.ones(K) / K
-    res_comm = minimize(comm_rp_obj, W0, method="SLSQP",
+    w0 = np.ones(K) / K
+    res_comm = minimize(comm_rp_obj, w0, method="SLSQP",
                         bounds=[(1e-6, 1.0)] * K,
-                        constraints=[{"type": "eq", "fun": lambda W: np.sum(W) - 1.0}],
+                        constraints=[{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}],
                         options={"maxiter": 2000, "ftol": 1e-14})
 
-    W_comm = res_comm.x if res_comm.success else np.ones(K) / K
-    W_comm = np.maximum(W_comm, 0)
-    W_comm /= W_comm.sum()
+    w_comm = res_comm.x if res_comm.success else np.ones(K) / K
+    w_comm = np.maximum(w_comm, 0)
+    w_comm /= w_comm.sum()
 
     # 第二层: 社区内部网络正则化 RP
     w_final = np.zeros(n)
@@ -540,7 +540,7 @@ def network_regularized_rp(returns: pd.DataFrame,
         n_k = len(idx)
 
         if n_k == 1:
-            w_final[idx[0]] = W_comm[k]
+            w_final[idx[0]] = w_comm[k]
             continue
 
         cov_k = cov[np.ix_(idx, idx)]
@@ -548,7 +548,7 @@ def network_regularized_rp(returns: pd.DataFrame,
 
         w_k = _nrrp_single_layer(cov_k, c_k, n_k, gamma, max_weight=1.0)
         for j, i in enumerate(idx):
-            w_final[i] = W_comm[k] * w_k[j]
+            w_final[i] = w_comm[k] * w_k[j]
 
     w_final = np.maximum(w_final, 0)
     if w_final.sum() > 0:
@@ -916,8 +916,6 @@ def community_bl_rp(returns: pd.DataFrame,
     """
     n = returns.shape[1]
     assets = returns.columns.tolist()
-    lw = LedoitWolf().fit(returns.values)
-    cov = lw.covariance_ * 252
 
     # --- 无社区信息: 退化为BL无观点 ---
     if partition is None or centralities is None:
@@ -947,28 +945,28 @@ def community_bl_rp(returns: pd.DataFrame,
         comm_returns_list.append(comm_ret)
     comm_returns_df = pd.DataFrame(comm_returns_list).T
 
-    lw_comm = LedoitWolf().fit(comm_returns_df.values)
+    lw_comm = LedoitWolf().fit(comm_returns_df.to_numpy())
     cov_comm = lw_comm.covariance_ * 252
 
-    def comm_rp_obj(W):
-        sigma = np.sqrt(W @ cov_comm @ W)
+    def comm_rp_obj(w):
+        sigma = np.sqrt(w @ cov_comm @ w)
         if sigma < 1e-10:
             return 1e10
-        mrc = cov_comm @ W / sigma
-        rc = W * mrc
+        mrc = cov_comm @ w / sigma
+        rc = w * mrc
         target = sigma / K
         return np.sum((rc - target) ** 2)
 
-    W0 = np.ones(K) / K
-    res_comm = minimize(comm_rp_obj, W0, method="SLSQP",
+    w0 = np.ones(K) / K
+    res_comm = minimize(comm_rp_obj, w0, method="SLSQP",
                         bounds=[(1e-6, 1.0)] * K,
                         constraints=[{"type": "eq",
-                                     "fun": lambda W: np.sum(W) - 1.0}],
+                                     "fun": lambda w: np.sum(w) - 1.0}],
                         options={"maxiter": 2000, "ftol": 1e-14})
 
-    W_comm = res_comm.x if res_comm.success else np.ones(K) / K
-    W_comm = np.maximum(W_comm, 0)
-    W_comm /= W_comm.sum()
+    w_comm = res_comm.x if res_comm.success else np.ones(K) / K
+    w_comm = np.maximum(w_comm, 0)
+    w_comm /= w_comm.sum()
 
     # --- 中心性归一化 (Layer 3 用) ---
     c = centralities.loc[assets, "betweenness"].values
@@ -986,12 +984,12 @@ def community_bl_rp(returns: pd.DataFrame,
         n_k = len(idx)
 
         if n_k == 1:
-            w_final[idx[0]] = W_comm[k]
+            w_final[idx[0]] = w_comm[k]
             continue
 
         # 社区子数据
         ret_k = returns.iloc[:, idx]
-        lw_k = LedoitWolf().fit(ret_k.values)
+        lw_k = LedoitWolf().fit(ret_k.to_numpy())
         cov_k = lw_k.covariance_ * 252
 
         # BL均衡收益
@@ -1031,7 +1029,7 @@ def community_bl_rp(returns: pd.DataFrame,
             w_k = np.ones(n_k) / n_k
 
         for j, i in enumerate(idx):
-            w_final[i] = W_comm[k] * w_k[j]
+            w_final[i] = w_comm[k] * w_k[j]
 
     w_final = np.maximum(w_final, 0)
     if w_final.sum() > 0:
@@ -1679,7 +1677,7 @@ def community_minvar(returns: pd.DataFrame,
         )
 
     # --- Layer 1: 跨社区风险平价 ---
-    lw_full = LedoitWolf().fit(returns.values)
+    lw_full = LedoitWolf().fit(returns.to_numpy())
     cov_full = lw_full.covariance_ * 252
 
     # 社区等权收益率
@@ -1699,7 +1697,7 @@ def community_minvar(returns: pd.DataFrame,
         )
 
     # 社区间风险平价
-    lw_comm = LedoitWolf().fit(comm_returns.values)
+    lw_comm = LedoitWolf().fit(comm_returns.to_numpy())
     cov_comm = lw_comm.covariance_ * 252
 
     def rp_obj(w_c):
@@ -1718,10 +1716,10 @@ def community_minvar(returns: pd.DataFrame,
                      options={"maxiter": 500, "ftol": 1e-10})
 
     if res_c.success:
-        W_comm = np.maximum(res_c.x, 0)
-        W_comm /= W_comm.sum()
+        w_comm = np.maximum(res_c.x, 0)
+        w_comm /= w_comm.sum()
     else:
-        W_comm = np.ones(K) / K
+        w_comm = np.ones(K) / K
 
     # --- Layer 2: 社区内 MinVar + 中心性约束 ---
     w_final = np.zeros(n)
@@ -1736,7 +1734,7 @@ def community_minvar(returns: pd.DataFrame,
         nc = len(cols)
 
         if nc == 1:
-            w_final[member_idx[0]] = W_comm[idx]
+            w_final[member_idx[0]] = w_comm[idx]
             continue
 
         # 社区内协方差
@@ -1761,10 +1759,10 @@ def community_minvar(returns: pd.DataFrame,
             relative_ub = np.ones(nc)
 
         # 社区内 MinVar
-        def sub_var(w):
+        def sub_var(w, cov_sub=cov_sub):
             return w @ cov_sub @ w
 
-        def sub_var_grad(w):
+        def sub_var_grad(w, cov_sub=cov_sub):
             return 2 * cov_sub @ w
 
         cons_sub = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
@@ -1783,7 +1781,7 @@ def community_minvar(returns: pd.DataFrame,
             w_sub = np.ones(nc) / nc
 
         for j, mi in enumerate(member_idx):
-            w_final[mi] = W_comm[idx] * w_sub[j]
+            w_final[mi] = w_comm[idx] * w_sub[j]
 
     # 全局最大权重约束 & 归一化
     w_final = np.minimum(w_final, max_weight)
