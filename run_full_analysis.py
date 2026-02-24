@@ -741,7 +741,7 @@ def _plot_cumulative_returns(backtest_results: dict, label_map: dict):
 
     ax.set_xlabel("日期", fontsize=12)
     ax.set_ylabel("累计净值", fontsize=12)
-    ax.set_title("十种资产配置策略累计净值对比", fontsize=14)
+    ax.set_title("十三种资产配置策略累计净值对比", fontsize=14)
     ax.legend(fontsize=10, loc="upper left")
     ax.grid(True, alpha=0.3)
     ax.axhline(y=1.0, color="black", linestyle="-", linewidth=0.5, alpha=0.5)

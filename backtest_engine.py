@@ -128,7 +128,7 @@ def rolling_backtest(returns: pd.DataFrame,
         rebalance_freq: 调仓频率 (天)
         network_func: 网络分析函数
         tc_bps: 单边交易成本 (基点, §2.6.3(5))
-        adaptive_rebalance: 是否启用自适应调仓 (§2.5.3)
+        adaptive_rebalance: 是否启用自适应调仓 (§2.5.4)
         stability_j: Jaccard边重叠率阈值 (adaptive模式)
         stability_nmi: 社区NMI阈值 (adaptive模式)
         verbose: 是否打印进度
@@ -174,7 +174,7 @@ def rolling_backtest(returns: pd.DataFrame,
                 except Exception:
                     pass
 
-            # 自适应调仓: 检查网络稳定性 (§2.5.3)
+            # 自适应调仓: 检查网络稳定性 (§2.5.4)
             should_rebalance = True
             if (adaptive_rebalance and net_result is not None
                     and prev_partition is not None):
@@ -197,7 +197,7 @@ def rolling_backtest(returns: pd.DataFrame,
             if should_rebalance:
                 try:
                     new_weights = strategy_func(train, **extra_kwargs)
-                    # 交易成本 (§2.6.3(5) / §2.4.3 换手率)
+                    # 交易成本 (§2.6.3(5) / §2.3.4 换手率)
                     turnover = np.sum(np.abs(new_weights - current_weights))
                     tc_cost = tc_bps / 10000.0 * turnover
                     current_weights = new_weights

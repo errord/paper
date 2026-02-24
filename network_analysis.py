@@ -29,7 +29,7 @@ def corr_to_distance(corr: pd.DataFrame) -> pd.DataFrame:
 
 def corr_to_distance_mi(corr: pd.DataFrame) -> pd.DataFrame:
     """替代距离函数 (基于互信息近似): d'_ij = sqrt(1 - rho_ij^2)
-    用于稳健性检验, 评估线性相关假设对结果的影响 (§2.3.1)
+    用于稳健性检验, 评估线性相关假设对结果的影响 (§2.2.1)
     """
     dist = np.sqrt(1.0 - np.clip(corr.values ** 2, 0, 1))
     np.fill_diagonal(dist, 0.0)
@@ -357,7 +357,7 @@ def community_nmi(partition1: dict, partition2: dict) -> float:
 
 
 # ============================================================
-#  9. 度分布保持的重连检验 (Maslov & Sneppen, 2002)  §2.3.4
+#  9. 度分布保持的重连检验 (Maslov & Sneppen, 2002)  §2.2.4
 # ============================================================
 
 def degree_preserving_rewiring_test(G: nx.Graph,
@@ -367,7 +367,7 @@ def degree_preserving_rewiring_test(G: nx.Graph,
     度分布保持的重连检验 (Maslov & Sneppen, 2002)
     在保持原始网络度分布不变的前提下随机重连边,
     检验社区结构和核心节点是否仅由度分布决定,
-    还是反映了更深层的连接模式 (§2.3.4 检验方法三)
+    还是反映了更深层的连接模式 (§2.2.4 检验方法三)
     """
     partition_obs = detect_communities(G)
     modularity_obs = compute_modularity(G, partition_obs)

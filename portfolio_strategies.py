@@ -1,19 +1,24 @@
 """
 投资组合策略模块
 ================
-10种资产配置策略实现:
-  传统 / 基准:
+13种资产配置策略实现 (与 theoretical_framework_v2 §2.3.2 对应):
+  基准 (1种):
     1. Equal Weight (1/N)
+  传统 (5种):
     2. Mean-Variance (Markowitz + Ledoit-Wolf 收缩)
     3. Risk Parity (标准风险平价)
     4. HRP (层次化风险平价)
     5. Black-Litterman 无观点 (逆优化隐含均衡收益)
     6. Black-Litterman 动量观点 (量化信号自动生成观点)
-  图模型:
-    7. Inverse Centrality (反中心性, 原论文方法)
-    8. Direct Centrality (中心性直接加权)
-    9. PageRank Weighting
-   10. Network-Regularized Risk Parity (本文改进方法)
+  图模型简单规则 (3种):
+    7. Inverse Centrality (反中心性, §2.3.2 规则1)
+    8. Direct Centrality (中心性直接加权, §2.3.2 规则2)
+    9. PageRank Weighting (§2.3.2 规则3)
+  融合方法 (4种, 本文贡献):
+   10. Network-Regularized Risk Parity (§2.4.2 NRRP)
+   11. Graph-Enhanced Black-Litterman (§2.4.3 网络增强BL)
+   12. RMT-Denoised Risk Parity (§2.4.4 去噪风险平价)
+   13. Community BL-RP Hybrid (§2.4.5 社区BL-RP混合)
 """
 
 import numpy as np
@@ -46,7 +51,7 @@ def mean_variance(returns: pd.DataFrame, risk_aversion: float = 2.0,
     Markowitz 均值方差优化
     使用 Ledoit-Wolf 收缩估计协方差矩阵, 提高数值稳定性
     max w'μ - (λ/2) w'Σw  s.t. sum(w)=1, w>=0, w_i<=β_max
-    含单一标的集中度约束 (§2.4.3)
+    含单一标的集中度约束 (§2.3.4)
     """
     n = returns.shape[1]
     mu = returns.mean().values * 252  # 年化
@@ -87,7 +92,7 @@ def risk_parity(returns: pd.DataFrame, max_weight: float = 0.10,
     标准风险平价: 每项资产对组合风险的边际贡献相等
     min Σ_i Σ_j (RC_i - RC_j)^2
     RC_i = w_i * (Σw)_i / σ_p
-    含单一标的集中度约束 (§2.4.3)
+    含单一标的集中度约束 (§2.3.4)
     """
     n = returns.shape[1]
     lw = LedoitWolf().fit(returns.values)
@@ -433,7 +438,7 @@ def inverse_centrality(returns: pd.DataFrame,
 
 
 # ============================================================
-#  6. Network-Regularized Risk Parity (本文方法)
+#  10. Network-Regularized Risk Parity (§2.4.2 NRRP)
 # ============================================================
 
 def network_regularized_rp(returns: pd.DataFrame,
@@ -552,7 +557,7 @@ def _nrrp_single_layer(cov: np.ndarray, c_norm: np.ndarray,
     """
     单层网络正则化风险平价优化
     min Σ(RC_i - RC_j)^2 + γ * Σ c_i * w_i^2
-    s.t. Σw=1, w>=0, w_i<=β_max  (§2.4.3)
+    s.t. Σw=1, w>=0, w_i<=β_max  (§2.3.4)
     """
     def objective(w):
         sigma_p = np.sqrt(w @ cov @ w)
@@ -589,7 +594,7 @@ def _nrrp_single_layer(cov: np.ndarray, c_norm: np.ndarray,
 
 
 # ============================================================
-#  8. Direct Centrality (中心性直接加权, §2.2.2 规则2)
+#  8. Direct Centrality (中心性直接加权, §2.3.2 规则2)
 # ============================================================
 
 def direct_centrality(returns: pd.DataFrame,
@@ -599,7 +604,7 @@ def direct_centrality(returns: pd.DataFrame,
     """
     中心性直接加权: w_i ∝ C(i)
     假设高中心性资产具有更高的信息效率或流动性溢价
-    (Výrost et al., 2019) (§2.2.2 规则2)
+    (Výrost et al., 2019) (§2.3.2 规则2)
     """
     if centralities is None:
         raise ValueError("需要提供 centralities DataFrame")
@@ -612,7 +617,7 @@ def direct_centrality(returns: pd.DataFrame,
 
 
 # ============================================================
-#  9. PageRank Weighting (PageRank加权, §2.2.2 规则3)
+#  9. PageRank Weighting (PageRank加权, §2.3.2 规则3)
 # ============================================================
 
 def pagerank_weight(returns: pd.DataFrame,
@@ -622,7 +627,7 @@ def pagerank_weight(returns: pd.DataFrame,
                     **kwargs) -> np.ndarray:
     """
     PageRank 加权: w_i ∝ PR(i)
-    综合考虑直接连接数目和邻居重要性 (§2.2.2 规则3)
+    综合考虑直接连接数目和邻居重要性 (§2.3.2 规则3)
     """
     import networkx as _nx
     from network_analysis import compute_correlation, build_pmfg
