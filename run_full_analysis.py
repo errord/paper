@@ -42,11 +42,13 @@ from network_analysis import (
     full_network_analysis,
 )
 from portfolio_strategies import (
-    equal_weight, mean_variance, risk_parity, hrp,
+    equal_weight, mean_variance, minimum_variance, max_diversification,
+    risk_parity, hrp,
     black_litterman_no_views, black_litterman_momentum,
     inverse_centrality, direct_centrality, pagerank_weight,
     network_regularized_rp,
     graph_enhanced_bl, denoised_rp, community_bl_rp,
+    graph_laplacian_mv, pmfg_filtered_rp, graph_smoothed_bl,
     select_gamma_cv, STRATEGY_REGISTRY, compute_weights,
 )
 from backtest_engine import (
@@ -452,14 +454,15 @@ def part2_gamma_selection(net_results: dict):
 
 def part3_backtest(net_results: dict, best_gamma: float):
     """
-    Part 3: 13种策略滚动回测
+    Part 3: 18种策略滚动回测
       基准 (1种): 等权
-      传统 (5种): 均值方差, 风险平价, HRP, BL无观点, BL动量
+      传统 (7种): MV, MinVar, MaxDiv, RP, HRP, BL无观点, BL动量
       图模型简单规则 (3种): 反中心性, 直接中心性, PageRank
-      融合方法 (4种): 网络正则化RP, 网络增强BL, 去噪RP, 社区BL-RP
+      融合方法 (7种): NRRP, Graph-BL, Denoised-RP, Community-BL-RP,
+                      Laplacian-MV, PMFG-Filtered-RP, Graph-Smoothed-BL
     """
     print("\n" + "█" * 60)
-    print("  Part 3: 13种策略滚动回测")
+    print("  Part 3: 18种策略滚动回测")
     print("█" * 60)
 
     # 加载三年合并数据
@@ -474,7 +477,7 @@ def part3_backtest(net_results: dict, best_gamma: float):
     print(f"  样本外起始: {returns_stocks.index[LOOKBACK].strftime('%Y-%m-%d')}")
 
     backtest_results = {}
-    N_STRAT = 13
+    N_STRAT = 18
 
     # ---- 基准 ----
     print(f"\n  [ 1/{N_STRAT}] 等权 (1/N)...", end="")
@@ -597,6 +600,50 @@ def part3_backtest(net_results: dict, best_gamma: float):
     backtest_results["community_bl_rp"] = res
     print(f" 完成 ({time.time()-t0:.1f}s)")
 
+    # ---- 前沿新增策略 ----
+    print(f"  [14/{N_STRAT}] ◆ 最小方差 (MinVar)...", end="")
+    t0 = time.time()
+    res = rolling_backtest(returns_stocks, minimum_variance,
+                           lookback=LOOKBACK, rebalance_freq=REBALANCE_FREQ,
+                           verbose=False)
+    backtest_results["min_variance"] = res
+    print(f" 完成 ({time.time()-t0:.1f}s)")
+
+    print(f"  [15/{N_STRAT}] ◆ 最大分散化 (MaxDiv)...", end="")
+    t0 = time.time()
+    res = rolling_backtest(returns_stocks, max_diversification,
+                           lookback=LOOKBACK, rebalance_freq=REBALANCE_FREQ,
+                           verbose=False)
+    backtest_results["max_div"] = res
+    print(f" 完成 ({time.time()-t0:.1f}s)")
+
+    print(f"  [16/{N_STRAT}] ◆ 图拉普拉斯MV (Laplacian-MV)...", end="")
+    t0 = time.time()
+    res = rolling_backtest(
+        returns_stocks, graph_laplacian_mv,
+        lookback=LOOKBACK, rebalance_freq=REBALANCE_FREQ,
+        network_func=quick_network, verbose=False)
+    backtest_results["laplacian_mv"] = res
+    print(f" 完成 ({time.time()-t0:.1f}s)")
+
+    print(f"  [17/{N_STRAT}] ◆ 图过滤RP (PMFG-Filtered RP)...", end="")
+    t0 = time.time()
+    res = rolling_backtest(
+        returns_stocks, pmfg_filtered_rp,
+        lookback=LOOKBACK, rebalance_freq=REBALANCE_FREQ,
+        network_func=quick_network, verbose=False)
+    backtest_results["pmfg_filtered_rp"] = res
+    print(f" 完成 ({time.time()-t0:.1f}s)")
+
+    print(f"  [18/{N_STRAT}] ◆ 图平滑动量BL (Graph-Smoothed BL)...", end="")
+    t0 = time.time()
+    res = rolling_backtest(
+        returns_stocks, graph_smoothed_bl,
+        lookback=LOOKBACK, rebalance_freq=REBALANCE_FREQ,
+        network_func=quick_network, verbose=False)
+    backtest_results["graph_smooth_bl"] = res
+    print(f" 完成 ({time.time()-t0:.1f}s)")
+
     return backtest_results
 
 
@@ -620,6 +667,8 @@ def part4_evaluation(backtest_results: dict):
     label_map = {
         "equal_weight": "等权(1/N)",
         "mean_variance": "均值方差(MV)",
+        "min_variance": "◆最小方差(MinVar)",
+        "max_div": "◆最大分散化(MaxDiv)",
         "risk_parity": "风险平价(RP)",
         "hrp": "层次化RP(HRP)",
         "bl_no_views": "BL无观点",
@@ -631,6 +680,9 @@ def part4_evaluation(backtest_results: dict):
         "graph_bl": "★网络增强BL",
         "denoised_rp": "★去噪风险平价",
         "community_bl_rp": "★社区BL-RP",
+        "laplacian_mv": "◆拉普拉斯MV",
+        "pmfg_filtered_rp": "◆图过滤RP",
+        "graph_smooth_bl": "◆图平滑动量BL",
     }
     perf_df.index = [label_map.get(n, n) for n in perf_df.index]
     if not test_df.empty:
@@ -700,34 +752,28 @@ def _plot_cumulative_returns(backtest_results: dict, label_map: dict):
     fig, ax = plt.subplots(figsize=(14, 7))
 
     colors = {
-        "equal_weight": "#888888",
-        "mean_variance": "#2196F3",
-        "risk_parity": "#4CAF50",
-        "hrp": "#FF9800",
-        "bl_no_views": "#00BCD4",
-        "bl_momentum": "#3F51B5",
-        "inv_centrality": "#9C27B0",
-        "direct_centrality": "#795548",
+        "equal_weight": "#888888", "mean_variance": "#2196F3",
+        "min_variance": "#1565C0", "max_div": "#0D47A1",
+        "risk_parity": "#4CAF50", "hrp": "#FF9800",
+        "bl_no_views": "#00BCD4", "bl_momentum": "#3F51B5",
+        "inv_centrality": "#9C27B0", "direct_centrality": "#795548",
         "pagerank": "#607D8B",
-        "network_reg_rp": "#E91E63",
-        "graph_bl": "#F44336",
-        "denoised_rp": "#009688",
-        "community_bl_rp": "#FF5722",
+        "network_reg_rp": "#E91E63", "graph_bl": "#F44336",
+        "denoised_rp": "#009688", "community_bl_rp": "#FF5722",
+        "laplacian_mv": "#D32F2F", "pmfg_filtered_rp": "#00695C",
+        "graph_smooth_bl": "#BF360C",
     }
     linewidths = {
-        "equal_weight": 1.0,
-        "mean_variance": 1.0,
-        "risk_parity": 1.0,
-        "hrp": 1.2,
-        "bl_no_views": 1.0,
-        "bl_momentum": 1.0,
-        "inv_centrality": 0.8,
-        "direct_centrality": 0.8,
-        "pagerank": 0.8,
-        "network_reg_rp": 1.5,
-        "graph_bl": 2.5,
-        "denoised_rp": 2.0,
-        "community_bl_rp": 2.0,
+        "equal_weight": 1.0, "mean_variance": 0.8,
+        "min_variance": 1.0, "max_div": 1.0,
+        "risk_parity": 0.8, "hrp": 1.0,
+        "bl_no_views": 0.8, "bl_momentum": 0.8,
+        "inv_centrality": 0.6, "direct_centrality": 0.6,
+        "pagerank": 0.6,
+        "network_reg_rp": 1.2, "graph_bl": 2.5,
+        "denoised_rp": 1.5, "community_bl_rp": 1.5,
+        "laplacian_mv": 2.0, "pmfg_filtered_rp": 2.0,
+        "graph_smooth_bl": 2.0,
     }
 
     for name, res in backtest_results.items():
@@ -741,7 +787,7 @@ def _plot_cumulative_returns(backtest_results: dict, label_map: dict):
 
     ax.set_xlabel("日期", fontsize=12)
     ax.set_ylabel("累计净值", fontsize=12)
-    ax.set_title("十三种资产配置策略累计净值对比", fontsize=14)
+    ax.set_title("十八种资产配置策略累计净值对比", fontsize=14)
     ax.legend(fontsize=10, loc="upper left")
     ax.grid(True, alpha=0.3)
     ax.axhline(y=1.0, color="black", linestyle="-", linewidth=0.5, alpha=0.5)
@@ -1009,6 +1055,8 @@ def part5_robustness(backtest_results: dict, net_results: dict,
         label_map_local = {
             "equal_weight": "等权(1/N)",
             "mean_variance": "均值方差(MV)",
+            "min_variance": "◆最小方差",
+            "max_div": "◆最大分散化",
             "risk_parity": "风险平价(RP)",
             "hrp": "层次化RP(HRP)",
             "bl_no_views": "BL无观点",
@@ -1020,6 +1068,9 @@ def part5_robustness(backtest_results: dict, net_results: dict,
             "graph_bl": "★网络增强BL",
             "denoised_rp": "★去噪风险平价",
             "community_bl_rp": "★社区BL-RP",
+            "laplacian_mv": "◆拉普拉斯MV",
+            "pmfg_filtered_rp": "◆图过滤RP",
+            "graph_smooth_bl": "◆图平滑动量BL",
         }
         rdf.index = [label_map_local.get(n, n) for n in rdf.index]
         rdf.to_csv(os.path.join(TABLES_DIR,
@@ -1137,9 +1188,10 @@ if __name__ == "__main__":
     total_start = time.time()
 
     print("╔══════════════════════════════════════════════════════════════╗")
-    print("║  基于图模型的资产配置策略 - 完整分析 (增强版)               ║")
-    print("║  13种策略: 基准(1)+传统(5)+图模型规则(3)+融合方法(4)        ║")
-    print("║  含 BL × 网络增强, RMT去噪, 社区层级BL-RP 三种融合创新    ║")
+    print("║  基于图模型的资产配置策略 - 完整分析 (v3增强版)             ║")
+    print("║  18种策略: 基准(1)+传统(7)+图规则(3)+融合(7)               ║")
+    print("║  新增: MinVar, MaxDiv, Laplacian-MV, PMFG-Filtered-RP,    ║")
+    print("║        Graph-Smoothed-BL 五种前沿方法                      ║")
     print("╚══════════════════════════════════════════════════════════════╝\n")
 
     # Part 1: 网络分析
