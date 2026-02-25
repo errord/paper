@@ -22,13 +22,19 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from matplotlib import rcParams
+from matplotlib import rcParams, font_manager
 import warnings
 
 warnings.filterwarnings("ignore")
 
-# 中文字体
-rcParams["font.sans-serif"] = ["Noto Sans CJK SC", "SimHei", "DejaVu Sans"]
+# 注册 Noto Sans CJK SC 字体（从 .ttc 提取的独立 .otf）
+_font_dir = os.path.expanduser("~/.local/share/fonts")
+for _fname in ("NotoSansCJK-SC-Regular.otf", "NotoSansCJK-SC-Bold.otf"):
+    _fpath = os.path.join(_font_dir, _fname)
+    if os.path.exists(_fpath):
+        font_manager.fontManager.addfont(_fpath)
+
+rcParams["font.sans-serif"] = ["Noto Sans CJK SC", "DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
 
 # 导入自定义模块
@@ -304,7 +310,7 @@ def _plot_mst(net_results: dict):
 
         nx.draw_networkx(mst, pos, ax=ax, node_color=node_colors,
                          node_size=sizes, font_size=6,
-                         width=0.8, alpha=0.9, font_family="SimHei")
+                         width=0.8, alpha=0.9, font_family="Noto Sans CJK SC")
         ax.set_title(f"{year}年 MST\n"
                      f"(节点大小=介数中心性, 颜色=社区)",
                      fontsize=12)

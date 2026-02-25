@@ -22,13 +22,19 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from matplotlib import rcParams
+from matplotlib import rcParams, font_manager
 import warnings
 
 warnings.filterwarnings("ignore")
 
-# 中文字体
-rcParams["font.sans-serif"] = ["Noto Sans CJK SC", "SimHei", "DejaVu Sans"]
+# 注册 Noto Sans CJK SC 字体（从 .ttc 提取的独立 .otf）
+_font_dir = os.path.expanduser("~/.local/share/fonts")
+for _fname in ("NotoSansCJK-SC-Regular.otf", "NotoSansCJK-SC-Bold.otf"):
+    _fpath = os.path.join(_font_dir, _fname)
+    if os.path.exists(_fpath):
+        font_manager.fontManager.addfont(_fpath)
+
+rcParams["font.sans-serif"] = ["Noto Sans CJK SC", "DejaVu Sans"]
 rcParams["axes.unicode_minus"] = False
 
 # 导入自定义模块
@@ -182,8 +188,8 @@ def part1_network_analysis():
     for year in YEARS:
         returns = load_returns(year)
 
-        # 排除宽基指数(仅保留个股)
-        idx_cols = [c for c in returns.columns if "指数" in c]
+        # v2遗留: 排除宽基指数列(v3中无此列, 此过滤为空操作)
+        idx_cols = [c for c in returns.columns if c in ("沪深300指数", "中证500指数")]
         returns_stocks = returns.drop(columns=idx_cols, errors="ignore")
 
         result = full_network_analysis(
@@ -304,7 +310,7 @@ def _plot_mst(net_results: dict):
 
         nx.draw_networkx(mst, pos, ax=ax, node_color=node_colors,
                          node_size=sizes, font_size=6,
-                         width=0.8, alpha=0.9, font_family="SimHei")
+                         width=0.8, alpha=0.9, font_family="Noto Sans CJK SC")
         ax.set_title(f"{year}年 MST\n"
                      f"(节点大小=介数中心性, 颜色=社区)",
                      fontsize=12)
@@ -388,8 +394,8 @@ def part2_gamma_selection(net_results: dict):
     returns_2023 = load_returns("2023")
     returns_2024 = load_returns("2024")
 
-    # 排除指数
-    idx_cols = [c for c in returns_2023.columns if "指数" in c]
+    idx_cols = [c for c in returns_2023.columns
+                if c in ("沪深300指数", "中证500指数")]
     returns_2023_s = returns_2023.drop(columns=idx_cols, errors="ignore")
     returns_2024_s = returns_2024.drop(columns=idx_cols, errors="ignore")
 
@@ -470,8 +476,8 @@ def part3_backtest(net_results: dict, best_gamma: float):
     # 加载三年合并数据
     all_returns = load_all_returns()
 
-    # 排除宽基指数
-    idx_cols = [c for c in all_returns.columns if "指数" in c]
+    idx_cols = [c for c in all_returns.columns
+                if c in ("沪深300指数", "中证500指数")]
     returns_stocks = all_returns.drop(columns=idx_cols, errors="ignore")
 
     print(f"  数据: {len(returns_stocks)}天 × {returns_stocks.shape[1]}个资产")
@@ -941,7 +947,8 @@ def part5_robustness(backtest_results: dict, net_results: dict,
     print("█" * 60)
 
     all_returns = load_all_returns()
-    idx_cols = [c for c in all_returns.columns if "指数" in c]
+    idx_cols = [c for c in all_returns.columns
+                if c in ("沪深300指数", "中证500指数")]
     returns_stocks = all_returns.drop(columns=idx_cols, errors="ignore")
 
     # ================================================================
@@ -1143,7 +1150,8 @@ def part5_robustness(backtest_results: dict, net_results: dict,
     # 使用 d'_ij = sqrt(1-ρ²) 构建 MST, 对比中心性排序
     for year in YEARS:
         returns_y = load_returns(year)
-        idx_cols_y = [c for c in returns_y.columns if "指数" in c]
+        idx_cols_y = [c for c in returns_y.columns
+                      if c in ("沪深300指数", "中证500指数")]
         returns_y = returns_y.drop(columns=idx_cols_y, errors="ignore")
 
         corr = compute_correlation(returns_y, method="ledoit_wolf")
